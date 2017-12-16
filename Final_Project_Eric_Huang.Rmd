@@ -1,0 +1,756 @@
+Analyze Red Wine Quality Data Set by Zhengyu (Eric) Huang
+========================================================
+
+In this final project for analyze red wine quality data set. My target is to 
+find which chemical properties influence the quality of red wine? And my second 
+target is to find the relationship between different features. My basic 
+intuitive of relationship between features is from the description of features.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Load all of the packages that you end up using
+# in your analysis in this code chunk.
+
+# Notice that the parameter "echo" was set to FALSE for this code chunk.
+# This prevents the code from displaying in the knitted HTML output.
+# You should set echo=FALSE for all code chunks in your file, unless it makes 
+# sense for your report to show the code that generated a particular plot.
+
+# The other parameters for "message" and "warning" should also be set to FALSE
+# for other code chunks once you have verified that each plot comes out as you
+# want it to. This will clean up the flow of your report.
+
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(plyr)
+library(reshape2)
+library(scales)
+library(RColorBrewer)
+library(rmarkdown)
+library(rpart)
+library(pander)
+library(GGally)
+library(memisc)
+library(randomForest)
+```
+
+More information about red wine quality data set can be found [here](https://s3.amazonaws.com/udacity-hosted-downloads/ud651/wineQualityInfo.txt).
+
+# Set default path and load red wine dataset
+Load the Data and get relevent information.
+```{r echo=FALSE, message=FALSE, warning=FALSE, Load_the_Data}
+# Below is my Win10 Laptop's path.
+setwd('C:/Users/zhengyhu/Desktop/TEMP/EDA_Final_Project_Eric_Huang/') 
+wine <- read.csv('wineQualityReds.csv', sep = ",")
+head(wine)
+```
+# Clean the red wine dataset
+First list all features and summary of wine dataset.
+```{r}
+pandoc.list(names(wine))
+pandoc.table(summary(wine))
+```
+Next, remove unrelevant feature X.
+```{r}
+wine$X <- NULL
+wine$X
+```
+Then, get unique values in all related columns.
+```{r}
+unique(wine$quality)
+```
+After that, I will set quality as an ordered level feature.
+```{r}
+wine$qualityLevel <- factor(wine$quality, ordered = T)
+```
+wine$qualityLevel is as follows:
+```{r}
+levels(wine$qualityLevel)
+```
+Finally, I will get basic structure summary of this dataset.
+```{r}
+str(wine)
+```
+
+According to previous given link, it can be concluded that there are one 
+dependent variable - *quality*, and 11 chemical properties as independent 
+variables. It looks like the first column named "X" has no relationship with 
+this data analyze. So I droped the column. According to description of this 
+dataset and unique() result, it looks like only *quality* should be an ordered 
+level feature. As a result, I generated a *qualityLevel* feature of wine, 
+containing ordered factor format of original feature *quality*. Original 
+*quality* will be used for prediction algorithms later in this report.   
+
+# Univariate Plots Section
+Below is the histgram plots for all features.
+```{r echo=FALSE, message=FALSE, warning=FALSE, Univariate_Plots_1}
+p1 <- ggplot(wine,aes(fixed.acidity)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p2 <- ggplot(wine,aes(volatile.acidity)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p3 <- ggplot(wine,aes(citric.acid)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p4 <- ggplot(wine,aes(residual.sugar)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p5 <- ggplot(wine,aes(chlorides)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p6 <- ggplot(wine,aes(free.sulfur.dioxide)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p7 <- ggplot(wine,aes(total.sulfur.dioxide)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p8 <- ggplot(wine,aes(density)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p9 <- ggplot(wine,aes(pH)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p10 <- ggplot(wine,aes(sulphates)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p11 <- ggplot(wine,aes(alcohol)) +
+  geom_histogram(bins=30,fill="yellow",colour="black")
+p12 <- ggplot(wine,aes(quality)) +
+  geom_histogram(fill="yellow",colour="black", stat = "count")
+grid.arrange(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, ncol = 4)
+```
+
+Use log10 conversion to redraw histogram of residual.sugar and chlorides because 
+they are highly positive skewed.
+```{r echo=FALSE, message=FALSE, warning=FALSE, Univariate_Plots_2}
+ggplot(data = wine, aes(x = residual.sugar)) +
+  geom_histogram() +
+  xlim(0, quantile(wine$residual.sugar, c(0.95))) +
+  scale_x_log10(breaks = round(seq(min(wine$residual.sugar), 
+                                   max(wine$residual.sugar), by = 2), 1)) +
+  scale_y_continuous(breaks = round(seq(0, 800, by = 50), 1))
+
+ggplot(data = wine, aes(x = chlorides)) +
+  geom_histogram() +
+  xlim(0, quantile(wine$chlorides, c(0.95))) +
+  scale_x_log10(breaks = round(seq(min(wine$chlorides), max(wine$chlorides), 
+                                   by = 0.05), 1)) +
+  scale_y_continuous(breaks = round(seq(0, 800, by = 50), 1))
+```
+
+Add a new variable log.all.acid to represent log10 of all acid related features.
+```{r echo=FALSE, message=FALSE, warning=FALSE, Univariate_Plots_3}
+wine$log.all.acid <- log10(1.0/(wine$fixed.acidity + wine$volatile.acidity + wine$citric.acid))
+grid.arrange(ggplot(data = wine, aes(x = log.all.acid)) +
+              geom_histogram(),
+            ggplot(data = wine, aes(x = pH)) +
+              geom_histogram(),
+            ncol = 2)
+```
+
+# Investigate outliers
+Use box plot to get a whole picture of outliers.
+```{r echo=FALSE, message=FALSE, warning=FALSE, Univariate_Plots_4}
+get_boxplot <- function(column, ylab) {
+  # Nothing should appear in x axis!
+  return(ggplot(wine, aes(x = '', y = column)) 
+         + geom_boxplot() 
+         + ylab(ylab)
+         + geom_jitter(alpha = 1/10))
+}
+grid.arrange(get_boxplot(wine$fixed.acidity, 'fixed acidity'),
+             get_boxplot(wine$volatile.acidity, 'volatile acidity'),
+             get_boxplot(wine$citric.acid, 'citric acid'),
+             get_boxplot(wine$log.all.acid, 'log.all.acid'),
+             get_boxplot(wine$residual.sugar, 'residual sugar'),
+             get_boxplot(wine$chlorides, 'chlorides'),
+             get_boxplot(wine$free.sulfur.dioxide, 'free sulf. dioxide'),
+             get_boxplot(wine$total.sulfur.dioxide, 'total sulf. dioxide'),
+             get_boxplot(wine$density, 'density'),
+             get_boxplot(wine$pH, 'pH'),
+             get_boxplot(wine$sulphates, 'sulphates'),
+             get_boxplot(wine$alcohol, 'alcohol'),
+             ncol = 4)
+```
+
+For more detail, I used red color to highlight all related outliers in both residual.sugar and chlorides below.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Univariate_Plots_5}
+grid.arrange(ggplot(wine, aes(x = '', y = residual.sugar)) + 
+               geom_jitter(alpha = 0.1) +
+               geom_boxplot(alpha = 0.2, color = 'red'),
+             ggplot(wine, aes(x = residual.sugar)) + 
+               geom_histogram(bins=30 ),ncol=2)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Univariate_Plots_6}
+grid.arrange(ggplot(wine, aes(x = '', y = chlorides)) + 
+               geom_jitter(alpha = 0.1) +
+               geom_boxplot(alpha = 0.2, color = 'red'),
+             ggplot(wine, aes(x = chlorides)) + 
+               geom_histogram(bins=30 ),ncol=2)
+```
+
+In order to get a whole picture of all features, in univariant plot section, I 
+drawed both histgram and box plot for each feature. It can be concluded from 
+both plots that:
+
+* Features - residual.sugar and chlorides has some big outliers according to 
+their box plots.
+* According to definition, pH should be log of acid. I have drawn log 
+fixed.acidity with pH. The result plot shows that their distributions are quite similar.
+* Both residual.sugar and chlorides are strongly positive skewed according to 
+histgram plot. As a result, I used log10 to convert the orginial data to make it 
+looks like normal distribution.  
+
+
+# Univariate Analysis
+
+### What is the structure of your dataset?
+My dataset contains 14 features. I removed *X* feature from original features 
+since it is a list of ordered integers which is not related to EDA of red wine dataset. And add *qualityLevel* feature to show that *quality* should be an 
+ordered level feature. Besides, I also add *log.all.acid* to features to 
+indicate the total acid rate. [Why I did it will be mentioned later in this 
+report.] So the result is all 14 informative features including two dependent 
+features - *quality* and *qualityLevel*.
+
+### What is/are the main feature(s) of interest in your dataset?
+My main features of interest are set into three groups - acid related, density 
+related and dioxide related. The reason is as follows:
+
+* According to definition of pH, it should be strongly related to all acid 
+related group. And according to my intuition(assumption), acid related faetures 
+should lead quality of wine to one direction (either good or bad). This group's features include - fixed acidity, volatile acidity, citric acid, log.all.acid 
+and pH. 
+* According to feature definition, density is depending on the percentage of 
+alcohol and sugar content. As a result, this group's features include - alcohol, density and residual sugar. Although I decided to add a feature to decompose 
+residual sugar into two groups - normal and sweet (> 45) according to definition
+, I could not find any data point has great than 45. As a result, I gave up.
+* According to feature definition, all dioxide is used for antimicrobial. As a 
+result, I assumed that they should cast little influence on quality of red wine. 
+This group's features include - free sulfur dioxide, total sulfur dioxide and sulphates. 
+
+### What other features in the dataset do you think will help support your investigation into your feature(s) of interest?
+The only feature left outside of three feature groups is *chlorides*. It is the 
+amount of salt in wine. Obviously it will influence the quality of wine. In the 
+later part of this report, I will calculate the correlation between *chlorides* 
+with quality of wine.
+
+### Did you create any new variables from existing variables in the dataset?
+Yes, I created *log.all.acid* to detail analyze relationship between pH and all 
+acid. Besides, I also created *qualityLevel* to show that quality is an ordered 
+level dependent feature. Later, I would also group quality to three discrete 
+levels. 
+
+### Of the features you investigated, were there any unusual distributions? Did you perform any operations on the data to tidy, adjust, or change the form of the data? If so, why did you do this?
+Yes. I found that distribution of both *residual.sugar* and *chlorides* are 
+strongly positive skewed. As a result, I used log10 conversion to do 
+transformation so that their converted distribution will be much more like 
+normal distribution. This is because I wanted their distribution to be normal so 
+that when doing linear and logisitic regresssion, their relationship to quality 
+can be approximately linear. In other words, the variant of these features will 
+not influence the variant of quality.
+
+
+# Bivariate Plots Section
+Confirm relationship between log.all.acid with pH.
+```{r echo=FALSE, message=FALSE, warning=FALSE, Bivariate_Plots_1}
+ggplot(aes(x = log.all.acid, y = pH), data = wine) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_smooth(method = 'lm', se = FALSE, size = 1)
+```
+
+The correlation value between log.all.acid and pH is:
+```{r}
+cor.test(wine$log.all.acid, wine$pH)
+```
+
+It can be concluded that there is clearly a positive linear relationship between 
+acid level and pH value since it is larger than 0.70. And correlation between 
+these two features are quite high! In my first submission review, the reviewer 
+wanted me to justify why log-scaling was applied to combination of all 
+acid-related variables into log.all.acid. There are two reasons. The first is 
+that I need to calculate correlation between all acid and pH value. However, pH 
+value is proportional to log10 of H+ which is proportional to 'g' unit. As a 
+result, I need to log scaled all acid related features. The second reason is 
+that usually Hp value is a more well known measurement that other acid related features. Through the correlation comparasion between pH and log.all.acid, in 
+the future feature engineering process which is NOT included in this final 
+report, I just need to consider either pH value of log.all.acid instead of a 
+group of acid related features.
+
+Below is ggcorr plot of pairwise features:
+```{r echo=FALSE, warning=FALSE, message=FALSE, Bivariate_Plots_2}
+# ggpairs(wine) + theme(axis.title.y = element_text(size = 8))
+ggcorr(wine)
+```
+
+Previous graph is not clear enough. As a result, I checked all features 
+correlation related to quality:
+```{r echo=FALSE, message=FALSE, warning=FALSE, Bivariate_Plots_3}
+simple_cor_test <- function(x, y) {
+  return(cor.test(x, as.numeric(y))$estimate)
+}
+correlations <- c(
+  simple_cor_test(wine$fixed.acidity, wine$quality),
+  simple_cor_test(wine$volatile.acidity, wine$quality),
+  simple_cor_test(wine$citric.acid, wine$quality),
+  simple_cor_test(wine$log.all.acid, wine$quality),
+  simple_cor_test(log10(wine$residual.sugar), wine$quality),
+  simple_cor_test(log10(wine$chlorides), wine$quality),
+  simple_cor_test(wine$free.sulfur.dioxide, wine$quality),
+  simple_cor_test(wine$total.sulfur.dioxide, wine$quality),
+  simple_cor_test(wine$density, wine$quality),
+  simple_cor_test(wine$pH, wine$quality),
+  simple_cor_test(log10(wine$sulphates), wine$quality),
+  simple_cor_test(wine$alcohol, wine$quality))
+names(correlations) <- c('fixed.acidity', 'volatile.acidity', 'citric.acid',
+                         'log.all.acid', 'log10.residual.sugar',
+                         'log10.chlordies', 'free.sulfur.dioxide',
+                         'total.sulfur.dioxide', 'density', 'pH',
+                         'log10.sulphates', 'alcohol')
+correlations
+```
+From correlations results, it can be concluded that not any feature has very 
+strong relationship between quality. Alcohol's correlation with quality is close 
+to 0.5 and show linear relationship with quality. Overall, only alcohol in 
+density group influence quality much. And in acid group, the fact that although 
+three acids related features has some kind of influence on quality but both pH 
+and log.all.acid has very little relationship with quality is out of my 
+expectation. This may due to unknown features that have little relationship with quality but will influence pH a lot.
+
+# The relationship between alcohole, density and residual sugar
+Correlation between alcohol and density:
+```{r}
+simple_cor_test(wine$alcohol, wine$density)
+```
+Correlation between density and log10 of residual.sugar:
+```{r}
+simple_cor_test(wine$density, log10(wine$residual.sugar))
+```
+The relationship between density and residual sugar:
+```{r echo=FALSE, message=FALSE, warning=FALSE, Bivariate_Plots_4}
+ggplot(aes(x = density, y = log10(wine$residual.sugar)), data = wine) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_smooth()
+```
+
+Strong correlation between log.all.acid and pH:
+```{r}
+cor(wine$log.all.acid, wine$pH)
+```
+The relationship between alcohol and density:
+```{r echo=FALSE, message=FALSE, warning=FALSE, Bivariate_Plots_9}
+ggplot(aes(x = alcohol, y = density), data = wine) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_smooth()
+```
+
+The strong correlations between both residual sugar, alcohol with density prove 
+that how density value is generated according to feature description - more 
+residual sugar and less alcohol leads to more density. And it also proves that 
+acid has a strong influence on pH value with more than 0.7 correlation value.
+
+The relationship between free.sulfur.dioxide and total.sulfur.dioxide:
+```{r echo=FALSE, message=FALSE, warning=FALSE, Bivariate_Plots_5}
+ggplot(data = wine, aes(x = free.sulfur.dioxide, y = total.sulfur.dioxide)) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_smooth()
+```
+
+Strong correlation between free.sulfur.dioxide and total.sulfur.dioxide:
+```{r}
+cor.test(wine$free.sulfur.dioxide, wine$total.sulfur.dioxide)
+```
+
+There is a strong correlation between free.sulfur.dioxide and 
+total.sulfur.dioxide. It can be seen that there exists a clear diagonal line 
+that goes through origin of graph below where no data points exist under it. The reason is that total.sulfur.dioxide is composed of free.sulfur.dioxide and other things.
+
+Previously, I spent all the time in pair of features that neither of them is 
+quality. Since there are so many different features, I would only depict some of 
+features. The relationship between quality and other features are distribution 
+of that feature on different categories of quality. There are two features - 
+alcohol and volatile.acidity whose has a much more than 0.3 correlation with 
+quality. Below are the two plots.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Bivariate_Plots_7}
+ggplot(aes(factor(quality), 
+            alcohol), 
+        data = wine) +
+  geom_jitter(alpha = 0.3)  +
+  geom_boxplot(alpha = 0.5, color = 'blue')+
+  stat_summary(fun.y = "mean", 
+               geom = "point", 
+               color = "red", 
+               shape = 8, 
+               size = 4)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Bivariate_Plots_8}
+ggplot(aes(factor(quality), 
+            volatile.acidity), 
+        data = wine) +
+  geom_jitter(alpha = 0.3)  +
+  geom_boxplot(alpha = 0.5, color = 'blue')+
+  stat_summary(fun.y = "mean", 
+               geom = "point", 
+               color = "red", 
+               shape = 8, 
+               size = 4)
+```
+
+From previous exam and graph, I can conclude:
+
+* There is a strong relationship between log.all.acid and pH, just as what I 
+have originally expected.
+* Alcohole, density are negatively correlated, density and residual sugar are positively correlated. It is obvious that alcohole is lighter than water (e.g 
+For same weight of water and alcohole, alcohole has more volumn compared with 
+water.). And sugar will surely increase more weight of whole but has little 
+volumn compared to water.
+* There is a strong relationship between free.sulfur.dioxide and 
+total.sulfur.dioxide which meets my assumption because free.sulfur.dioxide is 
+part of total.sulfur.dioxide.
+* Not any feature has very strong relationship with quality. Alcohol is an 
+important feature in deciding quality. Overall, only alcohol in density group influences quality much.
+
+In next part, I will still focus on each group's influence on quality of wine 
+through graphs. Besides, I will use several prediction algorithms to build 
+predict models on *quality* feature to compare accuracy between these models.
+
+# Bivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. How did the feature(s) of interest vary with other features in the dataset?
+Some of the relationships include - *pH* and *log.all.acid*, 
+*free.sulfur.dioxide* and *total.sulfur.dioxide*, *density* and *alcohol*, 
+*density* and *residual.sugar*. With increase of *log.all.acid*, *pH* will also increase and they have a very strong correlation. More *residual.sugar* will 
+tend to increase *density* while more *alcohol* will tend to decrease *density*. 
+More *total.sulfur.dioxide* will tend to increase *free.sulfur.dioxide*. 
+
+### Did you observe any interesting relationships between the other features (not the main feature(s) of interest)?
+I observed that *chlorides* has little correlation between quality of wine. 
+
+### What was the strongest relationship you found?
+The strongest relationship in original feature I found is between *total.sulfur.dioxide* and *free.sulfur.dioxide*. The strongest relationship 
+including my new generated features is *pH* and *log.all.acid*.
+
+
+# Multivariate Plots Section
+Before I devided all quality levels to three levels - bad, average and good, I 
+would like to consider two features who mostly correlated with quality mentioned 
+in bivariate final part. These two features are alcohol and volatile.acidity. 
+Below is the plot to depict the separation.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots}
+ggplot(aes(x = alcohol, 
+           y = volatile.acidity, color = qualityLevel), 
+       data = wine) +
+      geom_point(alpha = 0.8, size = 1) +
+      geom_smooth(method = "lm", se = FALSE, size = 1)  +
+  scale_color_brewer(type='seq',
+                   guide=guide_legend(title='Quality'))
+```
+
+In fact, there is a final feature - sulphates who has a higher than 0.3 
+correlation with quality level. And this plot is given me by the second viewer 
+of my EDA's final project. And I believe the latter plot has a better sepration 
+effect than that of previous one. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots_0}
+ggplot(aes(x = alcohol, 
+           y = sulphates, color = qualityLevel), 
+       data = wine) +
+      geom_point(alpha = 0.8, size = 1) +
+      geom_smooth(method = "lm", se = FALSE, size = 1)  +
+  scale_color_brewer(type='seq',
+                   guide=guide_legend(title='Quality'))
+```
+
+Now, I would use three levels - bad, average and good to represent wine 
+quality. It will result in more concise and clear graph so that it is convenient 
+for me to find relationship between features and quality of wine. Also it will 
+combine both ends of quality (with only few points) such as 3 or 8 with other 
+quality level to make plot trends more robust.
+
+Rating the wine quality with three levels - bad, average and good.
+```{r}
+wine$rating <- ifelse(wine$quality <= 5, 'bad', ifelse(
+   wine$quality < 7, 'average', 'good'))
+```
+First, distribution of these levels - bad, average and good is shown below:
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots_1}
+colors <- c('red', 'blue', 'orange')
+ggplot(data = wine, aes(x = rating)) + 
+  geom_histogram(stat='count', fill=colors) +
+  scale_x_discrete(limits=c('bad', 'average', 'good'))
+```
+
+I have tried my best to choose the two cut points (here I choosed 5 and 7) to 
+make three levels as evenly distributed as possible.
+
+Plot on citric.acid, volatile.acidity and quality:
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots_2}
+ggplot(data = wine, aes(x = citric.acid, y = volatile.acidity, 
+                        color = rating)) +
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size = 1)
+```
+
+Fewer good wine when citric.acid is low compared with high citric.acid. The 
+lower volatile.acidity, the better of rating.
+
+Plot on volatile.acidity and rating:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots_3}
+ggplot(data = wine, aes(x = volatile.acidity, fill = rating)) +
+  geom_density(alpha = 0.5)
+```
+
+It is more clear to see that the lower volatile.acidity, the better of rating.
+
+Plot on citirc.acid and rating:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots_5}
+ggplot(data = wine, aes(x = citric.acid, fill = rating)) +
+  geom_density(alpha = 0.5)
+```
+
+It is clear to see that citric.acid is in middle (between 0.25 - 0.5) better 
+ratings is more than elsewhere.
+
+Plot on alcohol, density and quality:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots_6}
+ggplot(data = wine, aes(x = alcohol, y = density, color = rating)) +
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size = 1)
+```
+
+There is a clear trend that more alcohol red wine contains, the better it tends 
+to be. And there seems to be no clear relationship between density and rating.
+
+Plot on alcohol and rating:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots_7}
+ggplot(data = wine, aes(x = alcohol, fill = rating)) +
+  geom_density(alpha = 0.5)
+```
+
+It is more clear to see in this graph that more alcohol will lead to better 
+rating.
+
+Plot on free.sulfur.dioxide, total.sulfur.dioxide and quality:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots_8}
+ggplot(data = wine, aes(x = sulphates, y = total.sulfur.dioxide, 
+                        color = rating)) +
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size = 1)
+```
+
+It looks like the increase of sulphates will lead to increase of rating. And if 
+there is too much total.sulfur.dioxide, the rating of wine will be dragged down. 
+So this plot rejected my assumption that dioxide related things indeed will 
+influence ratings of red wine which seems quite strange to me.
+
+Plot on total.sulfur.dioxide and rating:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots_9}
+ggplot(data = wine, aes(x = total.sulfur.dioxide, fill = rating)) +
+  geom_density(alpha = 0.5)
+```
+
+It can be seen in this graph that if total.sulfur.dioxide is lower than about 60
+, there is not much relevance between it and rating. However, when it is higher 
+than 100, almost no good wine appears, but bad wine data points still appear in 
+the plot.
+
+Plot on sulphates and rating:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Multivariate_Plots_10}
+ggplot(data = wine, aes(x = sulphates, fill = rating)) +
+  geom_density(alpha = 0.5)
+```
+
+Sulphates is the final feature in dioxide related feature group. It looks like 
+when sulphates is below 1.0, rating will increase when sulphates increase.
+
+
+=====Use linear regreesion to predict red wine dataset
+```{r echo=FALSE, message=FALSE, warning=FALSE, prediction_algorithms_1}
+set.seed(123)
+samp <- sample(nrow(wine), 0.9 * nrow(wine))
+train <- wine[samp, ]
+test <- wine[-samp, ]
+m1 <- lm(I(alcohol) ~ I(quality), data = train)
+m2 <- update(m1, ~ . + density)
+m3 <- update(m2, ~ . + citric.acid)
+m4 <- update(m3, ~ . + fixed.acidity)
+m5 <- update(m4, ~ . + total.sulfur.dioxide)
+m6 <- update(m5, ~ . + free.sulfur.dioxide)
+m7 <- update(m6, ~ . + alcohol + residual.sugar + pH + sulphates + 
+               volatile.acidity)
+mtable(m1, m2, m3, m4, m5, m6, m7)
+modelEstimate = predict(m7, newdata = test,
+                        interval = "prediction", level = .95)
+real_prediction <- round(modelEstimate) - 6
+err <- ifelse(real_prediction == test$quality, 0, 1) 
+err_rate <- sum(err) / length(err)
+```
+The error rate of linear regression model:
+```{r}
+err_rate
+```
+Looks like red wine quality data set can NOT be properly modeled by a linear 
+model since this error rate is too high.
+
+
+=====Use decision tree to predict red wine dataset
+```{r echo=FALSE, message=FALSE, warning=FALSE, prediction_algorithms_2}
+fit <- rpart(quality~fixed.acidity + citric.acid + density + sulphates + alcohol 
+             + pH + residual.sugar + volatile.acidity + free.sulfur.dioxide + total.sulfur.dioxide, data=wine, control=rpart.control(minsplit=5))
+summary(fit)
+predictions <- predict(fit, wine)
+real_pred <- round(predictions)
+err <- ifelse(real_pred == wine$quality, 0, 1) 
+err_rate <- sum(err) / length(err)
+```
+The error rate of decision tree model:
+```{r}
+err_rate
+```
+Although decision tree model shows much better error rate than that of linear regression, it still predicted poorly. It may be related to only about 10 
+relevant features to cut. Compared with large amounts of data points, decision 
+tree is a weak model for prediction. Next, I will use random forest to do 
+prediction. It will aggregate a lot weak decision tree models to vote for a much stronger model.
+
+
+=====Use Random Forest to predict red wine dataset
+```{r echo=FALSE, message=FALSE, warning=FALSE, prediction_algorithms_3}
+set.seed(123)
+samp <- sample(nrow(wine), 0.7 * nrow(wine))
+train <- wine[samp, ]
+test <- wine[-samp, ]
+model <- randomForest(quality~fixed.acidity + citric.acid + density + sulphates 
+                      + alcohol + pH + residual.sugar + volatile.acidity + free.sulfur.dioxide + total.sulfur.dioxide, data = train, ntree = 2000)
+pred <- predict(model, newdata = test)
+realPred <- round(pred)
+```
+The result of random forest model:
+```{r}
+table(realPred, test$quality)
+```
+Random forest's error rate is a little more than 30%. It is better than decision 
+tree as what I have expected.
+
+
+# Multivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. Were there features that strengthened each other in terms of looking at your feature(s) of interest?
+In this part, I mainly focus on evaluate each of three group's influence on 
+quality rate of red wine. In acid feature group, both citric.acid and 
+volatile.acidity shadow some impact on rating. But their directions to influence rating is opposite. In density group, only alcohol plays an important role in influencing quality of wine. In dioxide group, surprisely, both sulphates and total.sulfur.dioxide will influence rating of wine. However, more 
+total.sulfur.dioxide will lead to higher rating while low sulphates will lead to 
+high rating. There is no feature that will strength each other in terms of 
+rating of red wine.  
+
+### Were there any interesting or surprising interactions between features?
+Before I wrote this report, I believed dioxide should not play a role in rating 
+of wine since they are only used to antibiotic. However, my analyze results 
+showed me the opposite. In dioxide feature group, both sulphates and total.sulfur.dioxide will indeed influence rating of wine. 
+
+### OPTIONAL: Did you create any models with your dataset? Discuss the strengths and limitations of your model.
+I created three models, weak from strong with red wine dataset. For linear model
+, predict using this dataset is a task of impossible. It shows that wine quality 
+is not linear seperablable by given features. It should be true because rating 
+is so subjective. The second model is decision tree. Since number of features is 
+100 times less than number of data records, although this model is much better 
+than linear model, it is still a weak predicter. However, the decision tree 
+result showed that I were on the right track. Finally, I used assembly model of decision tree - random forest model to use a lot of (in this code, 2000 trees) 
+weak decision trees to vote for result. The predict accuracy is increased by approximately 10%. I have been an internship in a healthcare startup company, 
+around 30% error rate is acceptable in healthcare. However, I believe for 
+predicting red wine quality, this error rate is still too high. From my point of 
+view, in order to increase the accuracy of prediction, linear model should not 
+be used. And dataset itself should be more balanced, i.e the number of each 
+quality level should be approximately the same. For random forest, although test 
+data contains quality 3, its prediction output does not contain quality 3. And 
+more related features should be added to this dataset such as time and place to 
+store red wine and red wine raw materials. With the new information, I believe 
+the accuracy of model prediction will be improved.   
+
+------
+
+# Final Plots and Summary
+
+### Plot One
+Confirm relationship between log10 of all acid and pH:
+```{r echo=FALSE, message=FALSE, warning=FALSE, Plot_One}
+ggplot(aes(x = log.all.acid, y = pH), data = wine) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_smooth(method = 'lm', se = FALSE, size = 1) +
+  ggtitle('Show near linear relationship between log.all.acid and pH') +
+  xlab('log10 of sum of fixed, volatile and citric acid (log10(g / dm^3))') +
+  ylab('pH')
+```
+
+### Description One
+After I have read the description of acid related features and definition of pH, [[Click here to see definition of pH](https://en.wikipedia.org/wiki/PH)] I 
+believed that pH should have a strong linear relationship with the log of sum of 
+all acid related features. And I confirmed my assumption by creating a new 
+feature called log.all.acid = log10(fixed.acid + volatile.acid + citric.acid) 
+and draw a smoothed line graph to show that there is really a linear 
+relationship between log10 of sum of acid and pH. This result met my original expectation.
+
+### Plot Two
+Plot on free.sulfur.dioxide, total.sulfur.dioxide and rating:
+```{r echo=FALSE, message=FALSE, warning=FALSE, Plot_Two}
+ggplot(data = subset(wine, wine$rating != "average"),
+       aes(x = sulphates, y = total.sulfur.dioxide, color = rating)) +
+  geom_point() +
+  ggtitle('Total sulfur dioxide and sulphates influence on rating') +
+  xlab('sulphates (potassium sulphate - g / dm3)') +
+  ylab('total.sulfur.dioxide (mg / dm^3)')
+```
+
+### Description Two
+Here I ignored average rating to let trends of rating with trends of both total.sulfur.dioxide and sulphates more clearer. Except three good points which 
+I believe is outliers, almost every good red wine is below main diagonal while a 
+large amounts of bad wine is up main diagonal. It can be easily concluded that 
+more sulphates and less total.sulfur.dioxide will generate a better wine. Before 
+I drawed this plot, I believed that total.sulfur.dioxide and sulphates which is 
+mainly used for antimicrobial should not play a role in red wine quality. 
+However, this plot told me that it is wrong! 
+
+### Plot Three
+Plot on alcohol and rating:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, Plot_Three}
+ggplot(data = subset(wine, wine$rating != "average"),
+       aes(x = alcohol, fill = rating)) +
+  geom_density(alpha = 0.5) +
+  ggtitle('Count of both bad and good ratings with respect to alcohol') +
+  xlab('alcohol (% by volume)') +
+  ylab('count of rating (number)')
+```
+
+### Description Three
+I also ignored average rating in this plot. From this bar graph, a clear trend 
+shows that more alcohol will attribute to better quality red wine. However, this 
+trend stops around alcohol 12% by volume. As what I have mentioned earlier, not 
+any feature is strongly correlated with wine quality. Alcohol is the same.
+
+------
+
+# Reflection
+First question: Where did I run into difficulties in the analysis?
+
+* I found it hard to get a clear understanding of what each feature really represents since I am not a chemistry related major.
+* I also found it hard to find clear entry point of this analyze (so I decompose most features into three related feature groups.).
+* I also found it hard to choose which prediction algorithms to use in this report.
+
+Second question: Where did I find successes?
+
+* I found success that after a lot of reading along with the help of my mom whose college major is life science, some chemical terms finally made sense to me. And these common senses led to some intuitive results such as pH vs all acid related features and SO2 itself in the long run should not influence the quality of wine.
+* After I had basic understanding and some assumptions of red wine data, an idea to group most of given features into three related groups (acid, desity and dioxide groups) came into my mind. And this idea finally went through all my report which is the main thread of red wine quality analyze. In both bivariate and multivariate plot analyze, I payed my attention to within group and between group and quality. This made this analyze both clear and easy to handle.   
+* The first predict algorithm I chose is linear regression. Before I applid this algorithm to red wine dataset, I thought it very likely to fail since the dependent variable - quality of wine is purely subjective according to description of this dataset. The result of prediction using linear regression is the same as what I have expected. Since I did not want to make this report too complex, I chose decision tree which is easy for me to understand as my second prediction algorithm to use. Decision tree's accuracy surprised me. I should be on the right track! In order to confirm it, I chose to use an assembly algorithm related to decision tree - random forest to do a final prediction. Random forest gave me roughly 70% accuracy. For this poor dataset (why this dataset is poor, please see next section of Reflection) and not that complex (such as NN) prediction algorithms, it works OK!
+
+Third question: How could the analysis be enriched in future work?
+
+As what I have discussed in prediction algorithms part, this dataset is poor and not good enough to train an accurate prediction model. The reasons are summarized as follows:
+
+* Data records on dependent feature - quality of red wine should be more balanced, i.e the number under each quality level should be approximately the same. 
+* More related features should be added to this dataset such as time and place to store red wine and red wine raw materials. 
+* With new information mentioned in previous bullets, I can do further analyze on some unsolved questions mentioned in this report. For example, "Why dioxide related features especially sulphates will clearly influence on red wine quality?", and "Should they only play a small role on antimicrobial on red wine?
+
+
+
